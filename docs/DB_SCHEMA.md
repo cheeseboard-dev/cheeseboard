@@ -22,6 +22,7 @@
 | updated_at | TIMESTAMP NOT NULL DEFAULT NOW() | 마지막 수집 시각 |
 | last_crawled_at | TIMESTAMP | 마지막 크롤 시각 |
 | last_refreshed_at | TIMESTAMP | 마지막 갱신 시각 |
+| is_active | BOOLEAN NOT NULL DEFAULT TRUE | FALSE: 수집 대상에서 제외 |
 
 ---
 
