@@ -3,7 +3,7 @@
 **프로젝트:** 치즈보드 (CheeseBoard)
 **작성일:** 2026-04-22
 **최종 수정:** 2026-05-07
-**상태:** Living Document — `cheeseboard-infra/init.sql`과 항상 동기화 유지
+**상태:** Living Document — Flyway 마이그레이션 파일(`cheeseboard-back/.../db/migration/`)과 항상 동기화 유지
 
 > 아키텍처 결정 근거: [DECISIONS.md](DECISIONS.md)
 
@@ -63,10 +63,13 @@
 ### users (사용자) — Phase 2
 
 네이버 OAuth 전용. 로컬 로그인 없음. ([DECISIONS.md #003](DECISIONS.md) 참고)
+`id`(UUID)가 내부 PK. `naver_id`는 Naver OAuth 식별자로 UNIQUE 컬럼.
+향후 다른 OAuth provider 추가 시 `auth_accounts` 테이블로 확장 가능.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| naver_id | VARCHAR(100) PK | 네이버 고유 식별자 |
+| id | UUID PK DEFAULT uuidv7() | 내부 식별자 |
+| naver_id | VARCHAR(100) NOT NULL UNIQUE | 네이버 고유 식별자 |
 | nickname | VARCHAR(100) NOT NULL | 닉네임 |
 | profile_image_url | TEXT | 프로필 이미지 URL |
 | email | VARCHAR(200) | 네이버 OAuth 제공 시에만 저장 |
@@ -83,10 +86,10 @@
 | id | UUID PK DEFAULT uuidv7() | — |
 | video_no | BIGINT NOT NULL FK → videos ON DELETE CASCADE | 대상 VOD |
 | tag | TEXT NOT NULL | 태그 텍스트 |
-| naver_id | VARCHAR(100) NOT NULL FK → users | 기여한 사용자 |
+| user_id | UUID NOT NULL FK → users.id | 기여한 사용자 |
 | created_at | TIMESTAMP NOT NULL DEFAULT NOW() | 태그 추가 시각 |
 
-**제약:** `UNIQUE (video_no, tag, naver_id)`
+**제약:** `UNIQUE (video_no, tag, user_id)`
 
 ---
 
@@ -97,10 +100,10 @@
 | id | UUID PK DEFAULT uuidv7() | — |
 | clip_uid | VARCHAR(20) NOT NULL FK → clips ON DELETE CASCADE | 대상 클립 |
 | tag | TEXT NOT NULL | 태그 텍스트 |
-| naver_id | VARCHAR(100) NOT NULL FK → users | 기여한 사용자 |
+| user_id | UUID NOT NULL FK → users.id | 기여한 사용자 |
 | created_at | TIMESTAMP NOT NULL DEFAULT NOW() | 태그 추가 시각 |
 
-**제약:** `UNIQUE (clip_uid, tag, naver_id)`
+**제약:** `UNIQUE (clip_uid, tag, user_id)`
 
 ---
 
@@ -109,7 +112,7 @@
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | UUID PK DEFAULT uuidv7() | — |
-| job_type | VARCHAR(20) NOT NULL | `initial` / `incremental` / `full` / `user_triggered` |
+| job_type | VARCHAR(20) NOT NULL | `initial` / `incremental` / `full` / `user_triggered` / `user_bulk` / `user_videos` / `user_clips` / `user_live` / `user_retry` |
 | started_at | TIMESTAMP NOT NULL DEFAULT NOW() | 시작 시각 |
 | finished_at | TIMESTAMP | 종료 시각 |
 | status | VARCHAR(10) NOT NULL DEFAULT 'running' | `running` / `done` / `failed` |
@@ -118,6 +121,7 @@
 | failed_count | INTEGER NOT NULL DEFAULT 0 | 실패 수 |
 | triggered_by | VARCHAR(20) | `scheduler` / `user` / `admin` |
 | error_msg | TEXT | 실패 시 오류 메시지 |
+| failed_channels | TEXT[] | 실패한 channel_id 목록 (재크롤용) |
 
 ---
 
@@ -133,7 +137,7 @@
 | idx_clips_read_count | clips | read_count DESC |
 | idx_clips_origin_video | clips | origin_video_id |
 | idx_video_user_tags_video | video_user_tags | video_no |
-| idx_video_user_tags_user | video_user_tags | naver_id |
+| idx_video_user_tags_user | video_user_tags | user_id |
 | idx_clip_user_tags_clip | clip_user_tags | clip_uid |
-| idx_clip_user_tags_user | clip_user_tags | naver_id |
+| idx_clip_user_tags_user | clip_user_tags | user_id |
 | idx_crawl_jobs_status | crawl_jobs | status, started_at DESC |

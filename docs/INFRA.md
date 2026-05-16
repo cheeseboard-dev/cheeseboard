@@ -19,7 +19,7 @@
 ```bash
 cd cheeseboard-infra
 cp .env.example .env      # .env 열어서 비밀번호 설정
-docker compose up -d      # PostgreSQL 16 컨테이너 실행
+docker compose up -d      # PostgreSQL 18 컨테이너 실행
 docker compose ps         # State: healthy 확인
 ```
 
@@ -87,14 +87,14 @@ Oracle Cloud Always Free Tier 한도:
 | RAM | 12 GB |
 | Boot Volume | 100 GB |
 | OS | Ubuntu 22.04 (ARM) |
-| 역할 | PostgreSQL 16 + Elasticsearch 8 |
+| 역할 | PostgreSQL 18 + Elasticsearch 8 |
 | 네트워크 | Private Subnet (공개 IP 없음) |
 
 **설치 소프트웨어:**
 
 | 소프트웨어 | 포트 | 접근 범위 |
 |---|---|---|
-| PostgreSQL 16 | 5432 | 앱 서버 내부 IP만 허용 |
+| PostgreSQL 18 | 5432 | 앱 서버 내부 IP만 허용 |
 | Elasticsearch 8 | 9200, 9300 | 앱 서버 내부 IP만 허용 |
 
 > DB 서버는 외부 인터넷에 직접 노출하지 않음. 앱 서버에서만 내부 네트워크로 접근.
@@ -193,19 +193,19 @@ Oracle Cloud Always Free Tier 한도:
 ### 4.1 DB 서버 설치
 
 ```bash
-# PostgreSQL 16
+# PostgreSQL 18
 sudo apt update
-sudo apt install -y postgresql-16 postgresql-client-16
+sudo apt install -y postgresql-18 postgresql-client-18
 
 # DB 및 사용자 생성
 sudo -u postgres psql -c "CREATE USER cheeseboard WITH PASSWORD 'your_password';"
 sudo -u postgres psql -c "CREATE DATABASE cheeseboard OWNER cheeseboard;"
 
 # 앱 서버 IP에서 접근 허용 (postgresql.conf)
-sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/16/main/postgresql.conf
+sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/18/main/postgresql.conf
 
 # pg_hba.conf에 앱 서버 IP 추가
-echo "host cheeseboard cheeseboard 10.0.1.0/24 md5" | sudo tee -a /etc/postgresql/16/main/pg_hba.conf
+echo "host cheeseboard cheeseboard 10.0.1.0/24 md5" | sudo tee -a /etc/postgresql/18/main/pg_hba.conf
 sudo systemctl restart postgresql
 ```
 
@@ -306,25 +306,26 @@ server {
 ### FastAPI 크롤러 (`.env`)
 
 ```env
-# DB 연결
-DB_HOST=10.0.2.x          # DB 서버 내부 IP
-DB_PORT=5432
-DB_NAME=cheeseboard
-DB_USER=cheeseboard
-DB_PASSWORD=your_password
+# 인증
+API_KEY_HASH=                         # bcrypt 해시 (필수)
 
-# Elasticsearch
-ES_HOST=http://10.0.2.x:9200
+# Discord 알림
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
-# Redis (크롤 갱신 중복 방지용 분산 락)
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# PostgreSQL
+DATABASE_URL=postgresql://cheeseboard:your_password@10.0.2.x:5432/cheeseboard
 
-# 수집 설정
-CRAWL_INTERVAL_HOURS=6     # 배치 수집 주기
-CRAWL_CONCURRENCY=3        # 동시 요청 수 (semaphore)
-INITIAL_STREAMERS_CSV=data/streamers.csv
+# 수집 제어 (기본값으로도 동작, 필요 시 오버라이드)
+MAX_CONCURRENT_REQUESTS=3             # 동시 CHZZK API 요청 수 (semaphore)
+DEFAULT_VIDEO_PAGES=10                # 채널당 VOD 최대 페이지
+DEFAULT_CLIP_PAGES=5                  # 채널당 클립 최대 페이지
+MAX_LIVE_PAGES=200                    # 라이브 크롤 최대 페이지
+
+# 파일 경로
+STREAMERS_CSV_PATH=data/streamers.csv
 ```
+
+> 증분 크롤 주기(3시간)·전체 크롤 주기(매주 일요일 03:00)는 `app/services/scheduler.py`에 하드코딩되어 있다.
 
 ### Spring Boot (`application.yml`)
 
@@ -349,46 +350,73 @@ server:
 
 ## 6. DB 스키마 (PostgreSQL DDL)
 
+> 진실 공급원은 Flyway 마이그레이션 파일(`cheeseboard-back/.../db/migration/`)이다. 아래는 현재 구현 상태의 참조용 요약이다.
+
 ```sql
 -- 스트리머
 CREATE TABLE streamers (
-    channel_id      VARCHAR(32) PRIMARY KEY,
-    channel_name    VARCHAR(100) NOT NULL,
+    channel_id        VARCHAR(32) PRIMARY KEY,
+    channel_name      VARCHAR(100) NOT NULL,
     profile_image_url TEXT,
-    follower_count  INTEGER,
-    updated_at      TIMESTAMP DEFAULT NOW()
+    follower_count    INTEGER,
+    updated_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_crawled_at   TIMESTAMP,
+    last_refreshed_at TIMESTAMP,
+    is_active         BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- VOD
 CREATE TABLE videos (
-    video_no        BIGINT PRIMARY KEY,
-    channel_id      VARCHAR(32) REFERENCES streamers(channel_id),
-    title           TEXT NOT NULL,
-    category        VARCHAR(100),
-    tags            TEXT[],
-    read_count      INTEGER DEFAULT 0,
-    duration        INTEGER,
-    published_at    TIMESTAMP,
-    thumbnail_url   TEXT
+    video_no          BIGINT PRIMARY KEY,
+    video_id          VARCHAR(40) NOT NULL UNIQUE,   -- 클립의 origin_video_id와 연결되는 UUID 식별자
+    channel_id        VARCHAR(32) REFERENCES streamers(channel_id),
+    title             TEXT NOT NULL,
+    category          VARCHAR(100),
+    tags              TEXT[],
+    read_count        INTEGER NOT NULL DEFAULT 0,
+    duration          INTEGER,
+    published_at      TIMESTAMP,
+    thumbnail_url     TEXT,
+    last_refreshed_at TIMESTAMP
 );
 
 -- 클립
 CREATE TABLE clips (
-    clip_uid        VARCHAR(100) PRIMARY KEY,
-    channel_id      VARCHAR(32) REFERENCES streamers(channel_id),
-    title           TEXT NOT NULL,
-    read_count      INTEGER DEFAULT 0,
-    duration        INTEGER,
-    created_at      TIMESTAMP,
-    thumbnail_url   TEXT,
-    origin_video_no BIGINT REFERENCES videos(video_no)
+    clip_uid          VARCHAR(20) PRIMARY KEY,
+    channel_id        VARCHAR(32) REFERENCES streamers(channel_id),
+    origin_video_id   VARCHAR(40) REFERENCES videos(video_id),  -- nullable
+    title             TEXT NOT NULL,
+    read_count        INTEGER NOT NULL DEFAULT 0,
+    duration          INTEGER,
+    created_at        TIMESTAMP,
+    thumbnail_url     TEXT,
+    last_refreshed_at TIMESTAMP
 );
 
--- 검색 성능용 인덱스
-CREATE INDEX idx_videos_channel ON videos(channel_id);
+-- 크롤 작업 이력
+CREATE TABLE crawl_jobs (
+    id              UUID PRIMARY KEY DEFAULT uuidv7(),
+    job_type        VARCHAR(20) NOT NULL,
+    started_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    finished_at     TIMESTAMP,
+    status          VARCHAR(10) NOT NULL DEFAULT 'running',
+    total_streamers INTEGER,
+    success_count   INTEGER NOT NULL DEFAULT 0,
+    failed_count    INTEGER NOT NULL DEFAULT 0,
+    triggered_by    VARCHAR(20),
+    error_msg       TEXT,
+    failed_channels TEXT[]
+);
+
+-- 인덱스
+CREATE INDEX idx_videos_channel    ON videos(channel_id);
+CREATE INDEX idx_videos_published_at ON videos(published_at DESC);
 CREATE INDEX idx_videos_read_count ON videos(read_count DESC);
-CREATE INDEX idx_clips_channel ON clips(channel_id);
-CREATE INDEX idx_clips_read_count ON clips(read_count DESC);
+CREATE INDEX idx_clips_channel     ON clips(channel_id);
+CREATE INDEX idx_clips_created_at  ON clips(created_at DESC);
+CREATE INDEX idx_clips_read_count  ON clips(read_count DESC);
+CREATE INDEX idx_clips_origin_video ON clips(origin_video_id);
+CREATE INDEX idx_crawl_jobs_status ON crawl_jobs(status, started_at DESC);
 ```
 
 ---

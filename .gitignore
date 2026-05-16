@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.pyo
+.ruff_cache/
 venv/
 .venv/
 .env
@@ -12,6 +13,12 @@ node_modules/
 dist/
 .next/
 
+# Local component repositories
+cheeseboard-back/
+cheeseboard-crawler/
+cheeseboard-front/
+cheeseboard-infra/
+
 # Java
 target/
 *.class
@@ -20,6 +27,7 @@ target/
 # IDE
 .idea/
 .vscode/
+.claude/
 *.iml
 
 # OS
