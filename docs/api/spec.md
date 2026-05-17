@@ -1,8 +1,9 @@
-# API 명세 (임시 초안)
+# API 명세
 
 **프로젝트:** 치즈보드 (CheeseBoard)
 **작성일:** 2026-04-22
-**상태:** 임시 초안 — 추후 상세 설계 예정
+**최종 수정:** 2026-05-16
+**상태:** Living Document — 인증 API 일부 구현, 검색/콘텐츠 API는 프론트 계약 기준 초안
 **Base URL:** `/api`
 
 ---
@@ -10,6 +11,8 @@
 ## 공통
 
 ### 응답 형식
+
+Spring Boot API는 성공 시 `data`, 실패 시 `error`를 담는 공통 래퍼를 사용한다.
 
 ```json
 {
@@ -30,6 +33,22 @@
 }
 ```
 
+### 페이지 응답 형식
+
+프론트 API 클라이언트는 커서가 아니라 페이지 기반 응답을 기대한다.
+
+```json
+{
+  "content": [],
+  "page": 0,
+  "size": 20,
+  "totalElements": 123,
+  "hasNext": true
+}
+```
+
+> `GET /api/clips/popular`, `GET /api/search`는 구현 시 위 페이지 응답을 `data` 안에 담는 형태로 맞춘다.
+
 ---
 
 ## 엔드포인트
@@ -43,14 +62,14 @@
 | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|---|---|
 | size | integer | N | 20 | 한 번에 가져올 개수 |
-| cursor | string | N | - | 무한스크롤 커서 (이전 응답의 nextCursor) |
+| page | integer | N | 0 | 0부터 시작하는 페이지 번호 |
 
 **Response**
 
 ```json
 {
   "data": {
-    "items": [
+    "content": [
       {
         "clipUid": "abc123",
         "title": "클립 제목",
@@ -63,8 +82,10 @@
         "thumbnailUrl": "https://..."
       }
     ],
-    "nextCursor": "eyJpZCI6MTIzfQ==",
-    "hasMore": true
+    "page": 0,
+    "size": 20,
+    "totalElements": 123,
+    "hasNext": true
   }
 }
 ```
@@ -84,14 +105,14 @@
 | sort | string | N | popular | 정렬: `popular` \| `latest` |
 | channelId | string | N | - | 스트리머 필터 |
 | size | integer | N | 20 | 한 번에 가져올 개수 |
-| cursor | string | N | - | 무한스크롤 커서 |
+| page | integer | N | 0 | 0부터 시작하는 페이지 번호 |
 
 **Response**
 
 ```json
 {
   "data": {
-    "items": [
+    "content": [
       {
         "type": "clip",
         "clipUid": "abc123",
@@ -117,8 +138,10 @@
         "thumbnailUrl": "https://..."
       }
     ],
-    "nextCursor": "eyJpZCI6MTIzfQ==",
-    "hasMore": true
+    "page": 0,
+    "size": 20,
+    "totalElements": 123,
+    "hasNext": true
   }
 }
 ```
@@ -133,7 +156,7 @@
 
 | 파라미터 | 타입 | 필수 | 기본값 | 설명 |
 |---|---|---|---|---|
-| q | string | Y | - | 입력 중인 검색어 (최소 1자) |
+| q | string | Y | - | 입력 중인 검색어 (프론트는 2자 이상일 때 요청) |
 | size | integer | N | 5 | 반환할 최대 후보 수 |
 
 **구현 방식:** ES `prefix query` on `channelName.keyword`
@@ -143,15 +166,15 @@
 ```json
 {
   "data": {
-    "suggestions": [
+    "content": [
       {
         "channelId": "0b33823ac81de48d5b78a38cdbc0ab94",
-        "channelName": "울프",
+        "name": "울프",
         "profileImageUrl": "https://..."
       },
       {
         "channelId": "...",
-        "channelName": "울챔스",
+        "name": "울챔스",
         "profileImageUrl": "https://..."
       }
     ]
@@ -194,13 +217,18 @@
 
 ### GET /api/auth/naver
 
-네이버 OAuth 로그인 시작. 네이버 인증 페이지로 리다이렉트.
+네이버 OAuth 로그인 시작. Spring Security OAuth2가 네이버 인증 페이지로 리다이렉트한다.
 
 ---
 
 ### GET /api/auth/naver/callback
 
-네이버 OAuth 콜백. 인증 완료 후 JWT를 HttpOnly 쿠키로 발급하고 원래 페이지로 리다이렉트.
+네이버 OAuth 콜백. 인증 완료 후 `access_token` JWT를 HttpOnly 쿠키로 발급하고 프론트엔드로 리다이렉트한다.
+
+**현재 구현 메모**
+- JWT subject는 내부 `users.id` UUID다.
+- Refresh Token/Redis 세션 저장은 아직 구현하지 않았다.
+- 기본 쿠키 속성: `HttpOnly`, `SameSite=Lax`, `path=/`, `maxAge=JWT_EXPIRY_SECONDS`.
 
 ---
 
@@ -213,6 +241,7 @@
 ```json
 {
   "data": {
+    "id": "018f5f62-...",
     "naverId": "abc123",
     "nickname": "울프팬",
     "profileImageUrl": "https://..."
@@ -226,7 +255,7 @@
 
 ### DELETE /api/auth/logout
 
-로그아웃. JWT 쿠키 삭제.
+로그아웃. `access_token` 쿠키를 만료시킨다. 현재는 서버 저장 세션이 없으므로 쿠키 삭제만 수행한다.
 
 ---
 

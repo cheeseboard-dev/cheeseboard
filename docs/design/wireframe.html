@@ -857,12 +857,12 @@
 
   // 관리자 추천 주제 (Topic) — 한 카드 = 한 컬렉션
   const topicData = [
-    { title:'2026 롤챔스 결승 명장면',     count:14, summary:'클립 11 · VOD 3' },
-    { title:'침착맨 레전드 합방 모음',     count:22, summary:'클립 18 · VOD 4' },
+    { title:'2026 롤챔스 결승 명장면',     count:11, summary:'클립 11' },
+    { title:'침착맨 레전드 합방 모음',     count:18, summary:'클립 18' },
     { title:'이번 주 풍월량 베스트',       count:8,  summary:'클립 8' },
-    { title:'강지 우정합방 BEST',          count:12, summary:'클립 9 · VOD 3' },
-    { title:'에디터 PICK — 신년 합방 정리', count:17, summary:'클립 13 · VOD 4' },
-    { title:'LCK 시즌 분석 모음',          count:10, summary:'VOD 10' },
+    { title:'강지 우정합방 BEST',          count:9,  summary:'클립 9' },
+    { title:'에디터 PICK — 신년 합방 정리', count:13, summary:'클립 13' },
+    { title:'LCK 시즌 분석 클립',          count:10, summary:'클립 10' },
   ];
 
   function renderCard(d) {
@@ -887,7 +887,7 @@
       <div class="topic-card" onclick="switchPage('topic-detail')">
         <div class="topic-cover">
           <span>커버 이미지</span>
-          <span class="topic-count-badge">영상 ${t.count}개</span>
+          <span class="topic-count-badge">클립 ${t.count}개</span>
           <div class="topic-cover-overlay"></div>
         </div>
         <div class="topic-body">
@@ -927,7 +927,7 @@
       <div class="hero-info">
         <div class="hero-label">🌟 추천 주제</div>
         <div class="hero-title">${t.title}</div>
-        <div class="hero-meta">영상 ${t.count}개 · ${t.summary}</div>
+        <div class="hero-meta">클립 ${t.count}개 · ${t.summary}</div>
         <button class="hero-cta" onclick="switchPage('topic-detail')">주제 보러가기 →</button>
       </div>`;
     heroCarousel.insertBefore(slide, heroCarousel.querySelector('.hero-nav.prev'));
